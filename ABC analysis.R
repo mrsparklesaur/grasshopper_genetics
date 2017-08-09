@@ -85,16 +85,17 @@ stat.sim$models<-models
 # Remove summary stats that have zero variance
 novar<-which(sapply(stat.sim[,1:(ncol(stat.sim)-1)], var)==0)
 stat.sim<-as.data.frame(stat.sim)[,-novar]
-# write.table(stat.sim2, "cp.statsim", row.names=F, quote=F, sep="\t")
+# write.table(stat.sim, "ms.statsim", row.names=F, quote=F, sep="\t")
 
-# ABC ---------------------------------------------------------------------
+# ABC -------------------------------------------------------------
+--------
 
-# par.sim<-read.table("cp.paramsim", header=TRUE, sep="\t")
-# stat.sim<-read.table("cp.statsim", header=TRUE, sep="\t")
+# par.sim<-read.table("ac.paramsim", header=TRUE, sep="\t")
+# stat.sim<-read.table("ac.statsim", header=TRUE, sep="\t")
 
 # Read in observed summary statistics (as a vector)
-stats.obs<-read.table("cpoutput.sumstats", header=TRUE, fill=TRUE)
-stats.obs<-stats.obs[,-novar]
+stats.obs<-read.table("acoutput.sumstats", header=TRUE, fill=TRUE)
+stats.obs<-stats.obs[,colnames(stats.obs) %in% colnames(stat.sim)]
 
 # check number of models and truncate to 2 million
 statsplit<-split(stat.sim, f=stat.sim$models)
@@ -126,8 +127,8 @@ boxplot(stat.sim2$mean_S~models, main="Mean S")
 # change nval to 1000 for real run
 # I think these tolerance values are in %, so 0.1 keeps 0.1% of the accepted simulations
 # Tolerance values keep (x) of the accepted simulations, so 0.01 will keep 1% of the accepted simulations
-cv.modsel<-cv4postpr(models, stat.sim2[,1:t], nval=100, tols=c(0.0005, 0.001, 0.002, 0.005, 0.01, 0.02), method="neuralnet")
-cv.modsel2<-cv4postpr(models, stat.sim2[,1:t], nval=100, tols=c(0.0005, 0.001, 0.002, 0.005, 0.01, 0.02), method="mnlogistic")
+cv.modsel.nnet<-cv4postpr(models, stat.sim2[,1:t], nval=100, tols=c(0.001, 0.002, 0.005, 0.01, 0.02), method="neuralnet")
+cv.modsel2<-cv4postpr(models, stat.sim2[,1:t], nval=100, tols=c(0.001, 0.002, 0.005, 0.01, 0.02), method="mnlogistic")
 s<-summary(cv.modsel)
 plot(cv.modsel, names.arg=mods)
 
@@ -139,7 +140,7 @@ plot(cv.modsel, names.arg=mods)
 # Calculate posterior probabilities of each scenario (using mnlogistic)
 modsel<-postpr(stats.obs, models, stat.sim2[,1:t], tol=0.001, method="mnlogistic")
 modsel2<-postpr(stats.obs, models, stat.sim2[,1:t], tol=0.005, method="neuralnet")
-modsel001<-postpr(stats.obs, models, stat.sim2[,1:t], tol=0.001, method="neuralnet")
+modsel001<-postpr(stats.obs, models, stat.sim3[,1:t], tol=0.001, method="neuralnet")
 summary(modsel)
 
 # tol=0.001 produces infinite values for some models; trim to higher likelihood models
@@ -155,17 +156,17 @@ modsel.trim2<-postpr(stats.obs, models.trim, stat.sim.trim[,1:t], tol=0.001, met
 # Goodness-of-fit
 # Plot histogram of null distribution against best model and superimpose observed value
 # Test goodness-of-fit
-stat.sim.mod<-stat.sim2[stat.sim2$models=="am",1:t]
-res.gfit.am<-gfit(target=stats.obs, sumstat=stat.sim.mod,
+stat.sim.mod<-stat.sim2[stat.sim2$models=="dn",1:t]
+res.gfit.dn<-gfit(target=stats.obs, sumstat=stat.sim.mod,
                statistic=median, tol = 0.001, nb.replicate=1000)
 summary(res.gfit)
-plot(res.gfit, main="cpup, nb=1000, tol=0.05, stat=median, Histogram under H0")
+plot(res.gfit, main="cpam, nb=1000, tol=0.001, stat=median, Histogram under H0")
 
 # Good to check that other models don't also provide a good fit, by running
 # gfit with different models.
 
 # Look at position in PC space; cprob=0.1 shows 90% envelope
-gfitpca2(target=stats.obs, sumstat=stat.sim2[,1:t], 
+gfitpca(target=stats.obs, sumstat=stat.sim4[,1:t], 
          index=models, cprob=0.1, xlim=c(-10, 10), ylim=c(-10, 10))
 
 # Infer parameter values --------------------------------------------------
@@ -175,8 +176,11 @@ par.sim.mod<-subset(par.sim2, models=="dn")
 
 # e.g. infer migration rate
 # can ABC estimate the migration rate?
-cv.res<-cv4abc(param=par.sim.mod[,"MIGR"], sumstat=stat.sim.mod[,1:(ncol(stat.sim.mod)-1)], nval=100,
-               tols=c(0.05, 0.1), method="rejection")
+cv.res<-cv4abc(param=par.sim.mod[,"MIGR"], sumstat=stat.sim.mod[,1:(ncol(stat.sim.mod)-1)], 
+               nval=100, tols=c(0.0005, 0.001), method="neuralnet")
+
+cv.res.all<-cv4abc(param=par.sim.mod[,1:4], sumstat=stat.sim.mod[,1:(ncol(stat.sim.mod)-1)], 
+                 transf="log",nval=10, tols=c(0.0005, 0.001), method="neuralnet")
 # Collins et al 2014, PRSB, 281, 20140097 use tolerance values of 0.001, 0.002, and 0.004
 # Prost et al 2013 GCB, 19, 1854-1864 has really well-described methods. 
 
@@ -185,8 +189,8 @@ summary(cv.res)
 par(mar=c(5, 3, 4, 0.5), cex=0.8)
 plot(cv.res, caption="rejection")
 
-res<-abc(target=stats.obs, param=par.sim.mod[,"MIGR"],
-         sumstat=stat.sim.mod[,1:(ncol(stat.sim.up)-1)], tol=0.05, method="rejection")
+res0005<-abc(target=stats.obs, param=par.sim.mod[,4],
+         sumstat=stat.sim.mod[,1:(ncol(stat.sim.mod)-1)], tol=0.0005, method="neuralnet")
 #generate summaries of the posterior distributions incl. median and credible intervals
 summary(res)
 hist(res)
@@ -198,3 +202,7 @@ hist(res)
 # 3. obtain sample from the distribution of the summary statistics a posteriori
 # by simulating the data sets with the N sampled multivariate parameters using simulation
 # software
+
+# Removing sd stats
+stat.sim3<-as.data.frame(stat.sim2)[,-c(grep(".*sd.*", colnames(stat.sim2)))]
+stats.obs<-stats.obs[,-c(grep(".*sd.*", colnames(stat.sim2)))]
